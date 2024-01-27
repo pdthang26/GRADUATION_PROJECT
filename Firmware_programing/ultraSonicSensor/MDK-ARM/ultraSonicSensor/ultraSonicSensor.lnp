@@ -1,0 +1,26 @@
+--cpu Cortex-M3
+"ultrasonicsensor\startup_stm32f103xb.o"
+"ultrasonicsensor\sr04.o"
+"ultrasonicsensor\convert_lib.o"
+"ultrasonicsensor\main.o"
+"ultrasonicsensor\stm32f1xx_it.o"
+"ultrasonicsensor\stm32f1xx_hal_msp.o"
+"ultrasonicsensor\stm32f1xx_hal_gpio_ex.o"
+"ultrasonicsensor\stm32f1xx_hal_can.o"
+"ultrasonicsensor\stm32f1xx_hal.o"
+"ultrasonicsensor\stm32f1xx_hal_rcc.o"
+"ultrasonicsensor\stm32f1xx_hal_rcc_ex.o"
+"ultrasonicsensor\stm32f1xx_hal_gpio.o"
+"ultrasonicsensor\stm32f1xx_hal_dma.o"
+"ultrasonicsensor\stm32f1xx_hal_cortex.o"
+"ultrasonicsensor\stm32f1xx_hal_pwr.o"
+"ultrasonicsensor\stm32f1xx_hal_flash.o"
+"ultrasonicsensor\stm32f1xx_hal_flash_ex.o"
+"ultrasonicsensor\stm32f1xx_hal_exti.o"
+"ultrasonicsensor\stm32f1xx_hal_tim.o"
+"ultrasonicsensor\stm32f1xx_hal_tim_ex.o"
+"ultrasonicsensor\system_stm32f1xx.o"
+--strict --scatter "ultraSonicSensor\ultraSonicSensor.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list "ultraSonicSensor.map" -o ultraSonicSensor\ultraSonicSensor.axf
