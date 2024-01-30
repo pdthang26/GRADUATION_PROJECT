@@ -14,11 +14,19 @@ import pandas as pd
 from math import *
 import pandas as pd
 import matlab.engine
+import cv2
+from numba import jit
+import time
 
 # Khởi động matlab engine
 eng = matlab.engine.start_matlab()
 print('MALAB ENGINE FINISHED BEGINNING !!!')
 
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+------------------KHAI BÁO NHỮNG ĐƯỜNG DẪN--------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
 
 # Đường dẫn tương đối của file
 
@@ -54,6 +62,18 @@ emergency_stop = os.path.abspath(emergency_stop_path)
 
 successful = os.path.abspath(successful_path)
 
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+-----------------------DECLARATION VARIABLE-------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
 '''Tạo các biến cần thiết cho chương trình'''
 
 # biến màu giao diện
@@ -86,6 +106,17 @@ objects_4 = [] # mảng để chứa elements được active bằng nút auto
 # Các biến dùng truyền UART
 anglar_vel_uart = emer_uart= b_uart= f_uart= p_uart= ang_uart= vel_uart= dis_uart = None
 ultra_uart=gps_port = None
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+------------------------- MAIN GUI ----------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
 
 ''' Chức năng giao diện '''
 
@@ -218,7 +249,7 @@ def show_angular_vel():
             actual_angular_vel = float( angular_vel[1:].replace('\x00',''))  
             
             break
-
+actual_angle = 0
 # hàm xử lý show angle
 def show_angle():
     global actual_angle
@@ -307,7 +338,6 @@ def show():
                 new_values = [float(value) for value in ultra_data]
                 if new_values != ultra_values:
                     ultra_values = new_values
-    # root.after(120, show) 
 
 # phân luồng cho nút show 
 def show_click():
@@ -317,6 +347,7 @@ def show_click():
 show_button = tk.Button(root,text = 'Show Value',state= 'disabled',bg='white',command=show_click)
 show_button.place(x= 460,y=460,height=30,width=80)
 objects_2.append(show_button)
+
 
 #Hàm cho nút Disconnect
 def disconnect_uart():
@@ -538,6 +569,18 @@ auto_frame = tk.Frame(root,height=120,width=340,highlightthickness=2,highlightba
 auto_frame.place(x=200,y=580)
 
 
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------FUNCTIONS---------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+
 # Hàm tam xuất giá trị
 def map(inValue,  inMax,  inMin, outMax,  outMin ):
 
@@ -597,56 +640,317 @@ def calculate_trajectory(map,startPoint,goalPoint):
     direction = result[:,3]
     return point, direction
 
-# cờ chạy
-run = False
-'''điểu khiển bánh trước sau chạy auto'''
+@jit(nopython = True)
+def check_colision_goal (loc_map, goal_x, goal_y, current_x, current_y):
+
+    if current_x >= goal_x:
+        loc_x_check = 100 -(current_x - goal_x)
+        if current_y >= goal_y:
+            loc_y_check = 100 +(current_y - goal_y)
+        else:
+            loc_y_check = 100 -(goal_y - current_y)
+           
+    else:
+        loc_x_check = 100 + (goal_x - current_x)
+        if current_y >= goal_y:
+            loc_y_check = 100 +(current_y - goal_y)
+        else:
+            loc_y_check = 100 -(goal_y - current_y)
+            
+
+    loc_x_check = int(loc_x_check)
+    loc_y_check = int(loc_y_check)
+    # dò sang bên phải 
+    for cnt_right in range(loc_x_check,200-loc_x_check):
+        if loc_map[loc_y_check][loc_x_check] == 0:
+            break
+    for cnt_left in range(loc_x_check,-1,-1):
+        if loc_map[loc_y_check][loc_x_check] == 0:
+            break
+    if cnt_right > 190 and cnt_left < 10:
+        colision = True
+        x_out = 0
+        y_out = 0
+    else:
+        colision = False
+        if cnt_right <= cnt_left:
+            x_out = goal_x + cnt_right
+            y_out = goal_y
+        else:
+            x_out = goal_x - cnt_left
+            y_out = goal_y
+    return colision, x_out,y_out
+    
+@jit(nopython=True)
+def create_local_map(glo_map,current_x, current_y):
+    start_x = max(current_x - 100, 0)
+    start_y = max(current_y - 100, 0)
+    end_x = min(start_x + 200, glo_map.shape[1])
+    end_y = min(start_y + 200, glo_map.shape[0])
+    loc_map = glo_map[start_y:end_y, start_x:end_x]
+    return loc_map,start_x,end_x,start_y,end_y
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------POPUP ĐIỀU KHIỂN--------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
 x_0 = 0 
 y_0 = 0
-goalPose  = [35.5, 37.5, 0]
-local_map = np.array(pd.read_csv('map2.csv'))
+goalPose = []
+# cờ chạy
+run = False
+list_state=[]
+# opencv để hiển thị vị trí và vẽ vật cản
+globalMap = cv2.imread('globalMapParking.png', cv2.IMREAD_GRAYSCALE)
+local_map =[]
+
+@jit(nopython=True)
+def create_binary_map(map_array):
+    binary_map = np.copy(map_array)
+    # Avoid multi-dimensional indexing by iterating over each element
+    for i in range(binary_map.shape[0]):
+        for j in range(binary_map.shape[1]):
+            if binary_map[i, j] > 75:
+                binary_map[i, j] = 1
+            else :
+                binary_map[i, j] = 0
+    return binary_map
+
+
+# Hàm callback khi chuột được click
+def draw_circle(event, x, y, flags, param):
+    if event == cv2.EVENT_LBUTTONDOWN:
+        cv2.circle(globalMap, (x, y), 1, 255, -1)
+
+def draw_global_map ():
+    global list_state
+    global x_0,y_0
+    global init_map, output_map,local_map
+    # Tạo một cửa sổ OpenCV và thiết lập hàm callback
+    cv2.namedWindow('Draw Circle',cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Draw Circle', 300, 751)
+    cv2.setMouseCallback('Draw Circle', draw_circle) 
+    init_map = create_binary_map(globalMap)
+
+    while True:
+        list_point = np.int32(list_state[:,:2])
+        output_map = create_binary_map(globalMap)
+        local_map,start_x_loc_map,end_x_loc_map,start_y_loc_map,end_y_loc_map = create_local_map(output_map,current_x = int(x_0*10), current_y=int(y_0*10))
+        cv2.polylines(globalMap, list_point, isClosed=False, color=50, thickness=-1)
+        cv2.rectangle(globalMap, (start_x_loc_map, start_y_loc_map), (end_x_loc_map, end_y_loc_map), 50, -1)
+        cv2.imshow('Draw Circle', globalMap)
+        # Nhấn phím 'ESC' để thoát
+        if cv2.waitKey(1) == 27:
+            cv2.destroyAllWindows()
+            break
+    
+
+# Hàm nút Start
+def start_click():
+    threading.Thread(target= draw_global_map).start()
+    # phân luồng để vẽ đồ thị
+
+       
+# Nút start vẽ đồ thị 
+start_btn = tk.Button(root, text = 'Open Map',bg='white',command = start_click,state='disabled')
+start_btn.place(x=460,y = 500,height=30,width=80)
+objects_2.append(start_btn)
+
+
+
+# tạo nhập thông tin vị 
+'''điểu khiển bánh trước sau chạy auto'''
+
+
+
+def table_info():
+    global x_init,y_init,x_0,y_0
+    global goalPoseGlobal
+
+
+    info_popup = tk.Toplevel(root)
+    info_popup.title('Entry infomation table')
+    info_popup.resizable(height=False,width=False)
+
+    # Tính toán vị trí của info_popup
+    root_width = root.winfo_width()
+    root_height = root.winfo_height()
+    info_popup_width = 360
+    info_popup_height = 400
+    x = root.winfo_rootx() + (root_width - info_popup_width) // 2
+    y = root.winfo_rooty() + (root_height - info_popup_height) // 2
+    info_popup.geometry(f"{info_popup_width}x{info_popup_height}+{x}+{y}")
+    info_popup.configure(bg=GUI_color)
+    
+    Entry_frame = tk.Frame(info_popup,height=130,width=340,highlightthickness=2,highlightbackground='#8DF8FF',bg=manu_color)
+    Entry_frame.place(x=10,y=10)
+
+    # Tạo nhãn ô nhập X
+    X_label_start = tk.Label(Entry_frame,text ='Entry X start',bg=manu_color)
+    X_label_start.place(x= 10, y=10)
+
+    #Tạo Entry X
+    X_entry_start = tk.Entry(Entry_frame,relief=tk.SUNKEN,justify='center',font=('Arial',13,'bold'))
+    X_entry_start.place(x=10,y=30,height=30,width=70)
+
+    # Tạo nhãn cho ô Y
+    Y_label_start = tk.Label(Entry_frame,text ='Entry Y start',bg=manu_color)
+    Y_label_start.place(x=100, y= 10 )
+
+    # Tạo ô ghi Y
+    Y_entry_start = tk.Entry(Entry_frame,relief=tk.SUNKEN,justify='center',font=('Arial',13,'bold'))
+    Y_entry_start.place(x=100, y= 30, height=30,width=70)
+
+    # Tạo nhãn cho ô X muc tieu
+    X_label_goal = tk.Label(Entry_frame,text ='Entry X goal',bg=manu_color)
+    X_label_goal.place(x=10, y= 65 )
+
+    # Tạo ô ghi X muc tieu
+    X_entry_goal = tk.Entry(Entry_frame,relief=tk.SUNKEN,justify='center',font=('Arial',13,'bold'))
+    X_entry_goal.place(x=10, y= 85, height=30,width=70)
+
+    # Tạo nhãn cho ô Y muc tieu
+    Y_label_goal = tk.Label(Entry_frame,text ='Entry Y goal',bg=manu_color)
+    Y_label_goal.place(x=100, y= 65 )
+
+    # Tạo ô ghi X muc tieu
+    Y_entry_goal = tk.Entry(Entry_frame,relief=tk.SUNKEN,justify='center',font=('Arial',13,'bold'))
+    Y_entry_goal.place(x=100, y= 85, height=30,width=70)
+
+    # Tạo nhãn cho ô goc muc tieu
+    angle_label_goal = tk.Label(Entry_frame,text ='Entry Angle goal',bg=manu_color)
+    angle_label_goal.place(x=190, y= 65 )
+
+    # Tạo ô ghi goc muc tieu
+    angle_entry_goal = tk.Entry(Entry_frame,relief=tk.SUNKEN,justify='center',font=('Arial',13,'bold'))
+    angle_entry_goal.place(x=190, y= 85, height=30,width=70)
+
+  # hien thi ket qua khi an nut set
+    result_text = "Coordinate of start point : \nCoordinate of goal point : "
+    result_display = tk.Label(info_popup,text =result_text,justify='left',bg=GUI_color,font=('Arial',13,'bold'))
+    result_display.place(x=10, y= 150 )
+    
+
+    # Hàm nút set
+    def set_click():
+        global x_init,y_init,x_0,y_0
+        global goalPoseGlobal
+        # Lấy giá trị từ các ô nhập liệu điểm bắt đầu
+        x_init = X_entry_start.get()
+        y_init = Y_entry_start.get()
+
+        x_init=float(x_init)
+        x_init=float(y_init)
+
+        x_0 = x_init*10
+        y_0 = y_init*10
+
+        # Lấy giá trị từ các ô nhập liệu điểm mục tiêu
+
+        x_goal = X_entry_goal.get()
+        y_goal = Y_entry_goal.get()
+        a_goal = angle_entry_goal.get()
+        # Tọa độ điểm mục tiểu
+        x_goal=float(x_goal)
+        y_goal=float(y_goal)
+        a_goal=float(a_goal)
+        goalPoseGlobal = [x_goal*10,y_goal*10,(a_goal+90)*pi/180]
+        # Hiển thị điểm vừa nhập
+        result_display['text'] = "Coordinate of start point : {}, {}, {}\nCoordinate of goal point : {}, {}, {}".format(x_init,x_init,actual_angle,x_goal,y_goal,a_goal)
+        # Xóa dữ liệu vừa nhập trong ô
+        X_entry_start.delete(0, tk.END)
+        Y_entry_start.delete(0, tk.END)
+        X_entry_goal.delete(0, tk.END)
+        Y_entry_goal.delete(0, tk.END)
+        angle_entry_goal.delete(0, tk.END)
+        # cho phép xe chạy
+        
+
+    # Tạo nút SET điểm
+    set_btn = tk.Button(info_popup,text='Set',bg='white',command=set_click)
+    set_btn.place(x=300,y=250,height=30,width=50)
+    info_popup.mainloop()
+# Nút nhập vị trí
+stop_btn = tk.Button(root,text ='Entry info',bg='white',command=table_info,state='disabled')
+stop_btn.place(x=460,y=540,height=30,width=80 )
+objects_2.append(stop_btn)
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+
+
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------ĐIỀU KHIỂN AUTOMATION---------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+
+
+'''điểu khiển bánh trước sau chạy auto'''
 def car_auto_control():
-    global local_map
-    global x_0,y_0,x_1,y_1
-    global list_state,list_direction
-    x_1,y_1 = calulation_next_point(start_point_X= x_0,start_point_Y=y_0,distance_turn = actual_dis,angle_turn=actual_angle)
-    current_state = [x_1+20, y_1 +20, actual_angle]
-    start_state = [x_1+20, y_1 +20, (actual_angle+90)*pi/180]
+    global local_map,x_0,y_0,x_1,y_1
+    global list_state,list_direction,goalPose,goalPoseGlobal,list_state_global
+    #tạo quỹ đạo di chuyển trên global map
+    start_state = [x_0*10, y_0*10, (actual_angle+90)*pi/180]
+    list_state_global,_ = calculate_trajectory(map = init_map ,startPoint = start_state, goalPoint = goalPoseGlobal)
 
-    x_0,y_0 =x_1,y_1
+    while run:
+        x_1,y_1 = calulation_next_point(start_point_X= x_0,start_point_Y=y_0,distance_turn = actual_dis,angle_turn=actual_angle)
+        current_state = [x_1*10, y_1*10, actual_angle]
+        start_state = [x_1*10, y_1*10, (actual_angle+90)*pi/180]
+
+        x_0,y_0 =x_1,y_1
+        
+        list_state, list_direction = calculate_trajectory(map = local_map ,startPoint = start_state, goalPoint = goalPose)
+        # Kiểm tra xe xe đã đến điểm cuối chưa
+        if len(list_state)>=2:
+            next_moving_point = list_state[1]
+        else:
+            next_moving_point = goalPose
+            next_moving_point[2] = next_moving_point[2]*180/pi -90
+
+        current_state = [x_1, y_1, actual_angle]
+        next_moving_point[:2] = next_moving_point[:2]/10
+        # xác định chiều xe 
+        if list_direction[1]==1:
+            direction = b'T'
+            front_pulse =str(int(stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
+            maximum_speed = 60
+
+        elif list_direction[1]==-1:
+            direction = b'L'
+            front_pulse =str(int(39900-stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
+            maximum_speed = 30
+        
+        back_speed = 45
+        
+
+        
+
+        # UART cho bánh trước
+        front_speed = chr(75)
+        f_uart_data = f_start_bit + front_speed.encode('utf-8') + front_pulse.encode('utf-8') + stop_bit
+        f_uart.write(f_uart_data)
+
+        #UART cho bánh sau
+        b_speed_str = str(back_speed)
+        b_uart_data = b_start_bit + direction + b_speed_str.encode('utf-8') + stop_bit
+        b_uart.write(b_uart_data)
+
     
-    list_state, list_direction = calculate_trajectory(map = local_map ,startPoint = start_state, goalPoint = goalPose)
-    # Kiểm tra xe xe đã đến điểm cuối chưa
-    if len(list_state)>=2:
-        next_moving_point = list_state[1]
-    else:
-        next_moving_point = goalPose
-        next_moving_point[2] = next_moving_point[2]*180/pi -90
-    # xác định chiều xe 
-    if list_direction[1]==1:
-        direction = b'T'
-        maximum_speed = 60
-
-    elif list_direction[1]==-1:
-        direction = b'L'
-        maximum_speed = 30
-    
-    back_speed = 45
-    
-
-    
-
-    # UART cho bánh trước
-    front_pulse =str(int(stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
-    front_speed = chr(75)
-    f_uart_data = f_start_bit + front_speed.encode('utf-8') + front_pulse.encode('utf-8') + stop_bit
-    f_uart.write(f_uart_data)
-
-    #UART cho bánh sau
-    b_speed_str = str(back_speed)
-    b_uart_data = b_start_bit + direction + b_speed_str.encode('utf-8') + stop_bit
-    b_uart.write(b_uart_data)
-
-    root.after(50, car_auto_control)
 '''------ooo------'''
 
 def go_click():
@@ -665,12 +969,17 @@ go_btn = tk.Button(auto_frame,image=go_img,bg= manu_color,borderwidth=0,command=
 go_btn.place(x=60, y=20 ,height=85,width=85)
 objects_4.append(go_btn)
 
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+
 
 lines = []
 # Hàm khi ấn nút Emergency Button 
 def em_click():
     global run
-
     run = False
     brake_adc_emer = b'E'
     brake_emer = p_start_bit + brake_adc_emer + stop_bit
@@ -692,7 +1001,18 @@ emer_button = tk.Button(auto_frame,image = emer, bg= manu_color, borderwidth=0, 
 emer_button.place(x=190, y=10, width=100, height=100)
 objects_4.append(emer_button)
 
-''' Chức năng manual'''
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
+
+
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------CHẾ ĐỘ MANUAL-----------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
 # Hàm chức năng cho nút Manual
 def manual_click():
     for obj in objects_1:
@@ -924,27 +1244,12 @@ brake_slide.place(x=85,y=10,width=220,height=70)
 objects_1.append(brake_slide)
 
 
-    
-# Hàm nút Start
-def start_click():
-    global graph_run
-    graph_run = True
-    # phân luồng để vẽ đồ thị
+'''-----------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------
+--------------------------------------------------------------------'''
 
-       
-# Nút start vẽ đồ thị 
-start_btn = tk.Button(root, text = 'Start',bg='white',command = start_click,state='disabled')
-start_btn.place(x=460,y = 500,height=30,width=80)
-objects_2.append(start_btn)
 
-def stop_click():
-    global run
-    run = False
-
-# Nút Stop vẽ đồ thị
-stop_btn = tk.Button(root,text ='Stop',bg='white',command=stop_click,state='disabled')
-stop_btn.place(x=460,y=540,height=30,width=80 )
-objects_2.append(stop_btn)
 
 # Chạy vòng lặp giao diện
 root.mainloop()
