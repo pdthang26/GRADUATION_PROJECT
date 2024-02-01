@@ -601,6 +601,7 @@ def map(inValue,  inMax,  inMin, outMax,  outMin ):
 
     
 # Hàm thuật toán đánh lái stanley control của bánh tước theo tọa độ điểm   
+@jit(nopython = True)
 def stanley_control_point(current_point,target_point,velocity,k_coef):
     psi = target_point[2]-current_point[2]
     front_wheel_point = [0,0] # tạo điểm lưu tọa độ của bánh trước
@@ -622,6 +623,7 @@ def stanley_control_point(current_point,target_point,velocity,k_coef):
         return pulse
     
 # hàm tìm ra điểm tiếp theo
+@jit(nopython = True)
 def calulation_next_point(start_point_X,start_point_Y,distance_turn, angle_turn):
     x = start_point_X
     y = start_point_Y
@@ -647,22 +649,29 @@ def calculate_trajectory(map,startPoint,goalPoint):
 def check_collision_goal (loc_map, goal_x, goal_y):
     loc_x_check = int(goal_x)
     loc_y_check = int(200-goal_y)
+    loc_y_up = max(min(loc_y_check-10, 200), 0)
+    loc_y_down = max(min(loc_y_check+11, 200), 0)
+
+    
     chk_right = 0
     chk_left = 0
     max_cnt_right = 200 - loc_x_check
     max_cnt_left  = loc_x_check 
+    collision = False
     # dò sang bên phải 
     for cnt_right in range(0,max_cnt_right):
-        if loc_map[loc_y_check][loc_x_check+cnt_right] == 0:
-            chk_left = chk_left + 1 
-            if chk_left == 10:
+        column = loc_map[loc_y_up:loc_y_down,loc_x_check+cnt_right]
+        if np.all(column == 0):
+            chk_right = chk_right + 1 
+            if chk_right == 10:
                 break
         else: 
             chk_left = 0
     for cnt_left in range(0,max_cnt_left):
-        if loc_map[loc_y_check][loc_x_check-cnt_left] == 0:
-            chk_right = chk_right + 1 
-            if chk_right == 10:
+        column = loc_map[loc_y_up:loc_y_down,loc_x_check-cnt_left]
+        if np.all( column == 0):
+            chk_left = chk_left + 1 
+            if chk_left == 10:
                 break
         else: 
             chk_right = 0
@@ -670,15 +679,28 @@ def check_collision_goal (loc_map, goal_x, goal_y):
         collision = True
         x_out = 0
         y_out = 0
+    
+    elif cnt_right > max_cnt_right-5 :
+        x_out = goal_x - cnt_left + chk_left
+        y_out = goal_y
+
+
+    elif cnt_left > max_cnt_left-5:
+        x_out = goal_x + cnt_right - chk_right
+        y_out = goal_y
+
     else:
-        collision = False
         if cnt_right <= cnt_left:
             x_out = goal_x + cnt_right - chk_right
             y_out = goal_y
+
         else:
             x_out = goal_x - cnt_left + chk_left
             y_out = goal_y
-    return collision, x_out,y_out
+
+
+    map = np.copy(loc_map)
+    return map,collision, x_out,y_out
     
 @jit(nopython=True)
 def create_local_map(glo_map,current_x, current_y):
@@ -794,7 +816,7 @@ def draw_global_map ():
         if cv2.waitKey(1) == 27:
             cv2.destroyAllWindows()
             break
-    np.savetxt('map_test.csv', local_map, delimiter=',')
+    # np.savetxt('map_test.csv', local_map, delimiter=',')
     
 
 # Hàm nút Start
@@ -955,21 +977,22 @@ def car_auto_control():
     index = 0
     p_index = 0
     while run:
+        start = time.time()
+
         x_1,y_1 = calulation_next_point(start_point_X= x_0,start_point_Y=y_0,distance_turn = actual_dis,angle_turn=actual_angle)
         x_0,y_0 = x_1,y_1
         
         goalPose,index = find_goalPose (glo_state= list_state_global ,current_x = x_1, current_y = y_1, current_step = p_index)
         p_index = index
         goalPose = goalPose.tolist()
-        check_colision, checked_goal_x, checked_goal_y = check_collision_goal (loc_map = local_map, goal_x = goalPose[0], goal_y = goalPose[1])
+        chk_local_map, check_colision, checked_goal_x, checked_goal_y = check_collision_goal (loc_map = local_map, goal_x = goalPose[0], goal_y = goalPose[1])
         goalChecked = [int(checked_goal_x),int(checked_goal_y), goalPose[2]]
+
         print(goalChecked)
-        print(check_colision)
         # mặc định vị trí xe luôn nằm giữa local map
         s_state = [100, 100, (actual_angle+90)*pi/180]
 
-        print(s_state)
-        list_state, list_direction = calculate_trajectory(map = local_map ,startPoint = s_state, goalPoint = goalChecked)
+        list_state, list_direction = calculate_trajectory(map = chk_local_map ,startPoint = s_state, goalPoint = goalChecked)
         draw_signal = True
         # Kiểm tra xe xe đã đến điểm cuối chưa
         # if len(list_state)>=2:
@@ -1003,7 +1026,8 @@ def car_auto_control():
         # b_uart_data = b_start_bit + direction + b_speed_str.encode('utf-8') + stop_bit
         # b_uart.write(b_uart_data)
 
-    
+        end = time.time()
+        print("Elapsed (with compilation) = %s" % (end - start))
 '''------ooo------'''
 
 def go_click():
