@@ -44,5 +44,5 @@ while True:
     if cv2.waitKey(1) == 27:
         cv2.destroyAllWindows()
         break
-np.savetxt('map22.csv', out, delimiter=',')
+
 print(out)

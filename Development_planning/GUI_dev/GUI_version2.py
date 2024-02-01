@@ -238,6 +238,7 @@ def connect_uart():
             messagebox.showerror('Error', f'Failed to open COM port: {str(e)}')
 
 # hàm xử lý show angular velocity
+actual_angular_vel=0            
 def show_angular_vel():
     global actual_angular_vel
     while(True):
@@ -264,6 +265,7 @@ def show_angle():
             break
 
 #Hàm xử lý show Velocity
+actual_vel = 0
 def show_vel():
     global actual_vel
     while(True):
@@ -277,6 +279,7 @@ def show_vel():
             break
 
 # Hàm xử lý show Distance
+actual_dis=0
 def show_dis():
     global actual_dis
     while(True):
@@ -641,54 +644,87 @@ def calculate_trajectory(map,startPoint,goalPoint):
     return point, direction
 
 @jit(nopython = True)
-def check_colision_goal (loc_map, goal_x, goal_y, current_x, current_y):
-
-    if current_x >= goal_x:
-        loc_x_check = 100 -(current_x - goal_x)
-        if current_y >= goal_y:
-            loc_y_check = 100 +(current_y - goal_y)
-        else:
-            loc_y_check = 100 -(goal_y - current_y)
-           
-    else:
-        loc_x_check = 100 + (goal_x - current_x)
-        if current_y >= goal_y:
-            loc_y_check = 100 +(current_y - goal_y)
-        else:
-            loc_y_check = 100 -(goal_y - current_y)
-            
-
-    loc_x_check = int(loc_x_check)
-    loc_y_check = int(loc_y_check)
+def check_collision_goal (loc_map, goal_x, goal_y):
+    loc_x_check = int(goal_x)
+    loc_y_check = int(200-goal_y)
+    chk_right = 0
+    chk_left = 0
+    max_cnt_right = 200 - loc_x_check
+    max_cnt_left  = loc_x_check 
     # dò sang bên phải 
-    for cnt_right in range(loc_x_check,200-loc_x_check):
-        if loc_map[loc_y_check][loc_x_check] == 0:
-            break
-    for cnt_left in range(loc_x_check,-1,-1):
-        if loc_map[loc_y_check][loc_x_check] == 0:
-            break
-    if cnt_right > 190 and cnt_left < 10:
-        colision = True
+    for cnt_right in range(0,max_cnt_right):
+        if loc_map[loc_y_check][loc_x_check+cnt_right] == 0:
+            chk_left = chk_left + 1 
+            if chk_left == 10:
+                break
+        else: 
+            chk_left = 0
+    for cnt_left in range(0,max_cnt_left):
+        if loc_map[loc_y_check][loc_x_check-cnt_left] == 0:
+            chk_right = chk_right + 1 
+            if chk_right == 10:
+                break
+        else: 
+            chk_right = 0
+    if cnt_right > max_cnt_right-5  and  cnt_left>max_cnt_left-5 :
+        collision = True
         x_out = 0
         y_out = 0
     else:
-        colision = False
+        collision = False
         if cnt_right <= cnt_left:
-            x_out = goal_x + cnt_right
+            x_out = goal_x + cnt_right - chk_right
             y_out = goal_y
         else:
-            x_out = goal_x - cnt_left
+            x_out = goal_x - cnt_left + chk_left
             y_out = goal_y
-    return colision, x_out,y_out
+    return collision, x_out,y_out
     
 @jit(nopython=True)
 def create_local_map(glo_map,current_x, current_y):
-    start_x = max(current_x - 100, 0)
-    start_y = max(current_y - 100, 0)
-    end_x = min(start_x + 200, glo_map.shape[1])
-    end_y = min(start_y + 200, glo_map.shape[0])
-    loc_map = glo_map[start_y:end_y, start_x:end_x]
+    loc_map = np.ones((200,200))
+    map = np.copy(glo_map)
+    x=current_x
+    y=map.shape[0]/10-current_y
+    start_x = max(int(x*10) - 100, 0)
+    start_y = max(int(y*10) - 100, 0)
+    end_x = min(start_x + 200, map.shape[1])
+    end_y = min(start_y + 200, map.shape[0])
+    loc_map_temp = map[start_y:end_y, start_x:end_x]
+    loc_map[:loc_map_temp.shape[0], :loc_map_temp.shape[1]] = loc_map_temp
     return loc_map,start_x,end_x,start_y,end_y
+
+@jit(nopython=True)
+def find_goalPose (glo_state,current_x, current_y, current_step ):
+    state = np.copy(glo_state)
+    current_x = current_x*10
+    current_y = current_y*10
+    for step in range(current_step,len(state)):
+        dis = sqrt((state[step,0]-current_x)**2 + (state[step,1]-current_y)**2)
+        if dis >= 90:
+            break
+    goal = state[step]
+    goal[0]= max(min(100+(goal[0]-current_x), 199), 0)
+    goal[1]= max(min(100+(goal[1]-current_y), 199), 0)
+    goal[2]= (actual_angle+90)*pi/180
+    return goal,step
+
+# Tạo ma trận chuyển đổi từ hệ quy chiếu local image sang hệ quy chiếu global image
+
+def transformation_matrix(center,arr_point_in):
+    point_in = np.copy(arr_point_in)
+    point_in = point_in.astype(np.int64)
+    array_out = np.array([])
+    rotation_matrix = np.array([[1, 0 ],
+                                [0, -1],])
+    translation_vector = np.array([center[0]*10-100, 750-(center[1]*10-100)])
+    for i in range(0, len(point_in)):
+        point = np.dot(rotation_matrix, point_in[i]) + translation_vector
+        if array_out.size == 0:  # Kiểm tra xem array_out có rỗng không
+            array_out = point
+        else:
+            array_out = np.vstack([array_out, point]) 
+    return array_out
 
 '''-----------------------------------------------------------------
 --------------------------------------------------------------------
@@ -705,12 +741,16 @@ def create_local_map(glo_map,current_x, current_y):
 x_0 = 0 
 y_0 = 0
 goalPose = []
+draw_signal = False
 # cờ chạy
 run = False
 list_state=[]
 # opencv để hiển thị vị trí và vẽ vật cản
 globalMap = cv2.imread('globalMapParking.png', cv2.IMREAD_GRAYSCALE)
-local_map =[]
+
+
+
+
 
 @jit(nopython=True)
 def create_binary_map(map_array):
@@ -718,7 +758,7 @@ def create_binary_map(map_array):
     # Avoid multi-dimensional indexing by iterating over each element
     for i in range(binary_map.shape[0]):
         for j in range(binary_map.shape[1]):
-            if binary_map[i, j] > 75:
+            if binary_map[i, j] > 100:
                 binary_map[i, j] = 1
             else :
                 binary_map[i, j] = 0
@@ -731,26 +771,30 @@ def draw_circle(event, x, y, flags, param):
         cv2.circle(globalMap, (x, y), 1, 255, -1)
 
 def draw_global_map ():
-    global list_state
+    global list_state,draw_signal
     global x_0,y_0
     global init_map, output_map,local_map
     # Tạo một cửa sổ OpenCV và thiết lập hàm callback
     cv2.namedWindow('Draw Circle',cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Draw Circle', 300, 751)
+    cv2.resizeWindow('Draw Circle', 150, 750)
     cv2.setMouseCallback('Draw Circle', draw_circle) 
     init_map = create_binary_map(globalMap)
 
     while True:
-        list_point = np.int32(list_state[:,:2])
         output_map = create_binary_map(globalMap)
-        local_map,start_x_loc_map,end_x_loc_map,start_y_loc_map,end_y_loc_map = create_local_map(output_map,current_x = int(x_0*10), current_y=int(y_0*10))
-        cv2.polylines(globalMap, list_point, isClosed=False, color=50, thickness=-1)
-        cv2.rectangle(globalMap, (start_x_loc_map, start_y_loc_map), (end_x_loc_map, end_y_loc_map), 50, -1)
+        local_map,start_x_loc_map,end_x_loc_map,start_y_loc_map,end_y_loc_map = create_local_map(output_map,current_x = x_0, current_y=y_0)
+        
+        if draw_signal:
+            center = np.array([x_0,y_0])
+            list_point = np.int32(transformation_matrix(center,list_state[:,:2]))
+            cv2.polylines(globalMap, [list_point], isClosed=False, color=95, thickness=1)
+            cv2.rectangle(globalMap, (start_x_loc_map, start_y_loc_map), (end_x_loc_map, end_y_loc_map), 95, 1)
         cv2.imshow('Draw Circle', globalMap)
         # Nhấn phím 'ESC' để thoát
         if cv2.waitKey(1) == 27:
             cv2.destroyAllWindows()
             break
+    np.savetxt('map_test.csv', local_map, delimiter=',')
     
 
 # Hàm nút Start
@@ -773,7 +817,8 @@ objects_2.append(start_btn)
 
 def table_info():
     global x_init,y_init,x_0,y_0
-    global goalPoseGlobal
+    global goalPoseGlobal,list_state_global
+
 
 
     info_popup = tk.Toplevel(root)
@@ -842,16 +887,16 @@ def table_info():
     # Hàm nút set
     def set_click():
         global x_init,y_init,x_0,y_0
-        global goalPoseGlobal
+        global goalPoseGlobal,list_state_global
         # Lấy giá trị từ các ô nhập liệu điểm bắt đầu
         x_init = X_entry_start.get()
         y_init = Y_entry_start.get()
 
         x_init=float(x_init)
-        x_init=float(y_init)
+        y_init=float(y_init)
 
-        x_0 = x_init*10
-        y_0 = y_init*10
+        x_0 = x_init
+        y_0 = y_init
 
         # Lấy giá trị từ các ô nhập liệu điểm mục tiêu
 
@@ -863,16 +908,19 @@ def table_info():
         y_goal=float(y_goal)
         a_goal=float(a_goal)
         goalPoseGlobal = [x_goal*10,y_goal*10,(a_goal+90)*pi/180]
+
+        #tạo quỹ đạo di chuyển trên global map
+        start_state = [x_init*10, y_init*10, (actual_angle+90)*pi/180]
+        list_state_global,_ = calculate_trajectory(map = init_map ,startPoint = start_state, goalPoint = goalPoseGlobal)
         # Hiển thị điểm vừa nhập
-        result_display['text'] = "Coordinate of start point : {}, {}, {}\nCoordinate of goal point : {}, {}, {}".format(x_init,x_init,actual_angle,x_goal,y_goal,a_goal)
+        result_display['text'] = "Coordinate of start point : {}, {}, {}\nCoordinate of goal point : {}, {}, {}\nCREATE GLOBAL LIST STATE SUCCESSFULLY !!!".format(x_init,x_init,actual_angle,x_goal,y_goal,a_goal)
         # Xóa dữ liệu vừa nhập trong ô
         X_entry_start.delete(0, tk.END)
         Y_entry_start.delete(0, tk.END)
         X_entry_goal.delete(0, tk.END)
         Y_entry_goal.delete(0, tk.END)
         angle_entry_goal.delete(0, tk.END)
-        # cho phép xe chạy
-        
+
 
     # Tạo nút SET điểm
     set_btn = tk.Button(info_popup,text='Set',bg='white',command=set_click)
@@ -901,54 +949,59 @@ objects_2.append(stop_btn)
 
 '''điểu khiển bánh trước sau chạy auto'''
 def car_auto_control():
+    global draw_signal
     global local_map,x_0,y_0,x_1,y_1
     global list_state,list_direction,goalPose,goalPoseGlobal,list_state_global
-    #tạo quỹ đạo di chuyển trên global map
-    start_state = [x_0*10, y_0*10, (actual_angle+90)*pi/180]
-    list_state_global,_ = calculate_trajectory(map = init_map ,startPoint = start_state, goalPoint = goalPoseGlobal)
-
+    index = 0
+    p_index = 0
     while run:
         x_1,y_1 = calulation_next_point(start_point_X= x_0,start_point_Y=y_0,distance_turn = actual_dis,angle_turn=actual_angle)
-        current_state = [x_1*10, y_1*10, actual_angle]
-        start_state = [x_1*10, y_1*10, (actual_angle+90)*pi/180]
-
-        x_0,y_0 =x_1,y_1
+        x_0,y_0 = x_1,y_1
         
-        list_state, list_direction = calculate_trajectory(map = local_map ,startPoint = start_state, goalPoint = goalPose)
+        goalPose,index = find_goalPose (glo_state= list_state_global ,current_x = x_1, current_y = y_1, current_step = p_index)
+        p_index = index
+        goalPose = goalPose.tolist()
+        check_colision, checked_goal_x, checked_goal_y = check_collision_goal (loc_map = local_map, goal_x = goalPose[0], goal_y = goalPose[1])
+        goalChecked = [int(checked_goal_x),int(checked_goal_y), goalPose[2]]
+        print(goalChecked)
+        print(check_colision)
+        # mặc định vị trí xe luôn nằm giữa local map
+        s_state = [100, 100, (actual_angle+90)*pi/180]
+
+        print(s_state)
+        list_state, list_direction = calculate_trajectory(map = local_map ,startPoint = s_state, goalPoint = goalChecked)
+        draw_signal = True
         # Kiểm tra xe xe đã đến điểm cuối chưa
-        if len(list_state)>=2:
-            next_moving_point = list_state[1]
-        else:
-            next_moving_point = goalPose
-            next_moving_point[2] = next_moving_point[2]*180/pi -90
+        # if len(list_state)>=2:
+        #     next_moving_point = list_state[1]
+        # else:
+        #     next_moving_point = goalPose
+        #     next_moving_point[2] = next_moving_point[2]*180/pi -90
 
-        current_state = [x_1, y_1, actual_angle]
-        next_moving_point[:2] = next_moving_point[:2]/10
-        # xác định chiều xe 
-        if list_direction[1]==1:
-            direction = b'T'
-            front_pulse =str(int(stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
-            maximum_speed = 60
+        # current_state = [10, 10, actual_angle]
+        # next_moving_point[:2] = next_moving_point[:2]/10
 
-        elif list_direction[1]==-1:
-            direction = b'L'
-            front_pulse =str(int(39900-stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
-            maximum_speed = 30
+        # # xác định chiều xe 
+        # if list_direction[1]==1:
+        #     direction = b'T'
+        #     front_pulse =str(int(stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
+        #     maximum_speed = 60
+
+        # elif list_direction[1]==-1:
+        #     direction = b'L'
+        #     front_pulse =str(int(39900-stanley_control_point(current_point= current_state ,target_point = next_moving_point,velocity=actual_vel,k_coef =3)))
+        #     maximum_speed = 30
         
-        back_speed = 45
-        
+        # back_speed = 45
+        # # UART cho bánh trước
+        # front_speed = chr(75)
+        # f_uart_data = f_start_bit + front_speed.encode('utf-8') + front_pulse.encode('utf-8') + stop_bit
+        # f_uart.write(f_uart_data)
 
-        
-
-        # UART cho bánh trước
-        front_speed = chr(75)
-        f_uart_data = f_start_bit + front_speed.encode('utf-8') + front_pulse.encode('utf-8') + stop_bit
-        f_uart.write(f_uart_data)
-
-        #UART cho bánh sau
-        b_speed_str = str(back_speed)
-        b_uart_data = b_start_bit + direction + b_speed_str.encode('utf-8') + stop_bit
-        b_uart.write(b_uart_data)
+        # #UART cho bánh sau
+        # b_speed_str = str(back_speed)
+        # b_uart_data = b_start_bit + direction + b_speed_str.encode('utf-8') + stop_bit
+        # b_uart.write(b_uart_data)
 
     
 '''------ooo------'''
