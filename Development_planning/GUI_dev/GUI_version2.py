@@ -634,11 +634,22 @@ def calulation_next_point(start_point_X,start_point_Y,distance_turn, angle_turn)
     return x_new,y_new
 
 # Hàm tính toán quỹ đạo sử dụng thuật toán Hybrid A*
-def calculate_trajectory(map,startPoint,goalPoint):
-    startPoint = matlab.double(startPoint) # [meters, meters, radians]
+def calculate_trajectory(map,startPoint,goalPoint,space):
+    ''' 
+    đơn vị trong hàm này là decimeter
+    đơn vị góc trong hàm này là radians
+
+    Giải thích thông số hàm 
+    startPoint, goalPoint là tọa độ điểm bắt đầu và điểm kết thúc với cầu trúc [tọa độ x, tọa độ y, góc ban đầu] phải là dạng list
+    map là dạng numpy.array và là binary map
+    space là khoảng cách Euclidean của các điểm đầu ra với nhau đơn vị là decimeter
+
+    '''
+    startPoint = matlab.double(startPoint) 
     goalPoint  = matlab.double(goalPoint)
     map  = matlab.double(map.tolist())
-    result = eng.Hybrid_Astar(map,startPoint,goalPoint)
+    space = eng.double(space)
+    result = eng.Hybrid_Astar(map,startPoint,goalPoint,space)
     result = np.array(result)
     point = result[:,:3]
     point[:,2] = (point[:,2]*180/pi)-90
@@ -647,14 +658,23 @@ def calculate_trajectory(map,startPoint,goalPoint):
 
 @jit(nopython = True)
 def check_collision_goal (loc_map, goal_x, goal_y):
+    # initial variable
+    safe_space = 15 # khoảng bán kính an toàn khi có vật cản trục x
+
+    nearest_r =0
+    nearest_l = 0
+
+
+    obstacle = ''
+
     loc_x_check = int(goal_x)
     loc_y_check = int(200-goal_y)
-    loc_y_up = max(min(loc_y_check-10, 200), 0)
-    loc_y_down = max(min(loc_y_check+11, 200), 0)
-
+    loc_y_up = max(min(loc_y_check-31, 200), 0)
+    loc_y_down = max(min(loc_y_check+31, 200), 0)
+    i=0
     
-    chk_right = 0
-    chk_left = 0
+    chk_right = 0# biến đếm cho check collision right
+    chk_left = 0# biến đếm cho check collision left
     max_cnt_right = 200 - loc_x_check
     max_cnt_left  = loc_x_check 
     collision = False
@@ -663,42 +683,66 @@ def check_collision_goal (loc_map, goal_x, goal_y):
         column = loc_map[loc_y_up:loc_y_down,loc_x_check+cnt_right]
         if np.all(column == 0):
             chk_right = chk_right + 1 
-            if chk_right == 10:
+            if chk_right == safe_space:
                 break
         else: 
-            chk_left = 0
+            obstacle = 'r'
+            chk_right = 0
+            if nearest_r ==0:
+                nearest_r = cnt_right
+            
     for cnt_left in range(0,max_cnt_left):
         column = loc_map[loc_y_up:loc_y_down,loc_x_check-cnt_left]
         if np.all( column == 0):
             chk_left = chk_left + 1 
-            if chk_left == 10:
+            if chk_left == safe_space:
                 break
         else: 
-            chk_right = 0
+            obstacle = 'l'
+            chk_left = 0
+            if nearest_l ==0:
+                nearest_l = cnt_left
     if cnt_right > max_cnt_right-5  and  cnt_left>max_cnt_left-5 :
         collision = True
         x_out = 0
         y_out = 0
     
     elif cnt_right > max_cnt_right-5 :
-        x_out = goal_x - cnt_left + chk_left
+        x_out = goal_x - cnt_left 
         y_out = goal_y
+        if obstacle != 'l' :
+            x_out = x_out+chk_left
+            if nearest_r < safe_space:
+                x_out = x_out-(15-nearest_r)
+        
 
 
     elif cnt_left > max_cnt_left-5:
-        x_out = goal_x + cnt_right - chk_right
+        x_out = goal_x + cnt_right 
         y_out = goal_y
+        if obstacle != 'r' :
+            x_out = x_out-chk_right
+            if nearest_l < safe_space:
+                x_out = x_out+(15-nearest_l)
+        
 
     else:
         if cnt_right <= cnt_left:
-            x_out = goal_x + cnt_right - chk_right
+            x_out = goal_x + cnt_right
             y_out = goal_y
-
+            if obstacle != 'r':
+                x_out = x_out-chk_right
+                if nearest_l < safe_space:
+                    x_out = x_out+(15-nearest_l)
+            
         else:
-            x_out = goal_x - cnt_left + chk_left
+            x_out = goal_x - cnt_left 
             y_out = goal_y
-
-
+            if obstacle != 'l' :
+                x_out = x_out+chk_left
+                if nearest_r < safe_space:
+                    x_out = x_out-(15-nearest_r)
+            
     map = np.copy(loc_map)
     return map,collision, x_out,y_out
     
@@ -716,6 +760,7 @@ def create_local_map(glo_map,current_x, current_y):
     loc_map[:loc_map_temp.shape[0], :loc_map_temp.shape[1]] = loc_map_temp
     return loc_map,start_x,end_x,start_y,end_y
 
+# Hàm tạo tìm điểm mục tiêu từ các điểm của global state cách vị trí xe hiện tại 90 decimeter
 @jit(nopython=True)
 def find_goalPose (glo_state,current_x, current_y, current_step ):
     state = np.copy(glo_state)
@@ -793,7 +838,7 @@ def draw_circle(event, x, y, flags, param):
         cv2.circle(globalMap, (x, y), 1, 255, -1)
 
 def draw_global_map ():
-    global list_state,draw_signal
+    global list_state,draw_signal, draw_global
     global x_0,y_0
     global init_map, output_map,local_map
     # Tạo một cửa sổ OpenCV và thiết lập hàm callback
@@ -801,10 +846,15 @@ def draw_global_map ():
     cv2.resizeWindow('Draw Circle', 150, 750)
     cv2.setMouseCallback('Draw Circle', draw_circle) 
     init_map = create_binary_map(globalMap)
-
+    draw_global = False
     while True:
         output_map = create_binary_map(globalMap)
         local_map,start_x_loc_map,end_x_loc_map,start_y_loc_map,end_y_loc_map = create_local_map(output_map,current_x = x_0, current_y=y_0)
+        if draw_global:
+            point = np.int32(list_state_global[:,:2])
+            point[:,1] = 750-point[:,1]
+            cv2.polylines(globalMap, [point], isClosed=False, color=95, thickness=1)
+            draw_global = False
         
         if draw_signal:
             center = np.array([x_0,y_0])
@@ -816,7 +866,7 @@ def draw_global_map ():
         if cv2.waitKey(1) == 27:
             cv2.destroyAllWindows()
             break
-    # np.savetxt('map_test.csv', local_map, delimiter=',')
+    # np.savetxt('map_test.csv', local_map, delimiter=',') 
     
 
 # Hàm nút Start
@@ -839,7 +889,7 @@ objects_2.append(start_btn)
 
 def table_info():
     global x_init,y_init,x_0,y_0
-    global goalPoseGlobal,list_state_global
+    global goalPoseGlobal,list_state_global,draw_global 
 
 
 
@@ -909,7 +959,7 @@ def table_info():
     # Hàm nút set
     def set_click():
         global x_init,y_init,x_0,y_0
-        global goalPoseGlobal,list_state_global
+        global goalPoseGlobal,list_state_global, draw_global 
         # Lấy giá trị từ các ô nhập liệu điểm bắt đầu
         x_init = X_entry_start.get()
         y_init = Y_entry_start.get()
@@ -933,9 +983,11 @@ def table_info():
 
         #tạo quỹ đạo di chuyển trên global map
         start_state = [x_init*10, y_init*10, (actual_angle+90)*pi/180]
-        list_state_global,_ = calculate_trajectory(map = init_map ,startPoint = start_state, goalPoint = goalPoseGlobal)
+        list_state_global,_ = calculate_trajectory(map = init_map ,startPoint = start_state, goalPoint = goalPoseGlobal,space= 15)
+        # np.savetxt('list_test.csv', list_state_global, delimiter=',')
+        draw_global = True
         # Hiển thị điểm vừa nhập
-        result_display['text'] = "Coordinate of start point : {}, {}, {}\nCoordinate of goal point : {}, {}, {}\nCREATE GLOBAL LIST STATE SUCCESSFULLY !!!".format(x_init,x_init,actual_angle,x_goal,y_goal,a_goal)
+        result_display['text'] = "Coordinate of start point : {}, {}, {}\nCoordinate of goal point : {}, {}, {}\nCREATE GLOBAL LIST STATE \nSUCCESSFULLY !!!".format(x_init,x_init,actual_angle,x_goal,y_goal,a_goal)
         # Xóa dữ liệu vừa nhập trong ô
         X_entry_start.delete(0, tk.END)
         Y_entry_start.delete(0, tk.END)
@@ -984,16 +1036,25 @@ def car_auto_control():
         
         goalPose,index = find_goalPose (glo_state= list_state_global ,current_x = x_1, current_y = y_1, current_step = p_index)
         p_index = index
+        
         goalPose = goalPose.tolist()
+        
         chk_local_map, check_colision, checked_goal_x, checked_goal_y = check_collision_goal (loc_map = local_map, goal_x = goalPose[0], goal_y = goalPose[1])
-        goalChecked = [int(checked_goal_x),int(checked_goal_y), goalPose[2]]
+        goalChecked = [checked_goal_x,checked_goal_y, goalPose[2]]
 
-        print(goalChecked)
         # mặc định vị trí xe luôn nằm giữa local map
+        # print(goalChecked)
         s_state = [100, 100, (actual_angle+90)*pi/180]
-
-        list_state, list_direction = calculate_trajectory(map = chk_local_map ,startPoint = s_state, goalPoint = goalChecked)
+        if check_colision== False:
+            list_state, list_direction = calculate_trajectory(map = chk_local_map ,startPoint = s_state, goalPoint = goalChecked, space=15)
+            # np.savetxt('list_state_test.csv', list_state, delimiter=',')
+            # print(list_state[-1,:])
+        else: 
+            print("Can't find goal state in 10 meter")
         draw_signal = True
+
+        end = time.time()
+        print("Elapsed (with compilation) = %s" % (end - start))
         # Kiểm tra xe xe đã đến điểm cuối chưa
         # if len(list_state)>=2:
         #     next_moving_point = list_state[1]
@@ -1026,8 +1087,7 @@ def car_auto_control():
         # b_uart_data = b_start_bit + direction + b_speed_str.encode('utf-8') + stop_bit
         # b_uart.write(b_uart_data)
 
-        end = time.time()
-        print("Elapsed (with compilation) = %s" % (end - start))
+        
 '''------ooo------'''
 
 def go_click():
