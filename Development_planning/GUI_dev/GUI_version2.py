@@ -325,26 +325,30 @@ def show_gps():
 
 ultra_values = []
 new_values = []
+
+def show_ultrasonic():
+    global ultra_values,new_values
+    ultrasonic = ultra_uart.readline().decode().strip()
+    if ultrasonic.startswith('U'):
+        ultra_data = ultrasonic[1:].replace('\x00','').split(',')
+        if len(ultra_data) == 4:
+            new_values = [float(value) for value in ultra_data]
+            if new_values != ultra_values:
+                ultra_values = new_values
+
 # Hàm nhấn nút show value
 def show():
-    global ultra_values,new_values
     while True:
         show_angle()
         show_dis()
         show_vel()
         show_angular_vel()
-        show_gps()
-        ultrasonic = ultra_uart.readline().decode().strip()
-        if ultrasonic.startswith('U'):
-            ultra_data = ultrasonic[1:].replace('\x00','').split(',')
-            if len(ultra_data) == 4:
-                new_values = [float(value) for value in ultra_data]
-                if new_values != ultra_values:
-                    ultra_values = new_values
+        show_ultrasonic()
 
 # phân luồng cho nút show 
 def show_click():
     threading.Thread(target = show).start()
+    threading.Thread(target = show_gps).start()
 
 # Tạo nút Show value
 show_button = tk.Button(root,text = 'Show Value',state= 'disabled',bg='white',command=show_click)
