@@ -48,9 +48,9 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
 
-TIM_HandleTypeDef htim3;
-
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart3_rx;
+DMA_HandleTypeDef hdma_usart3_tx;
 
 /* USER CODE BEGIN PV */
 // controller variable
@@ -59,15 +59,16 @@ uint32_t back_adc_p = 0;
 uint32_t front_adc_p = 0;
 uint32_t brake_adc_p = 0;
 
-uint8_t countSend;
+uint8_t countSend =0 ;
 uint8_t count;
 uint8_t buffer;
 uint8_t dataBuff[9];
-char data_y[20];
-char data_v[20];
-char data_d[20];
-char data_a[20];
-char data_us[21];
+//char data_y[20];
+//char data_v[20];
+//char data_d[20];
+//char data_a[20];
+//char data_us[21];
+char DMAdataSend[21];
 
 typedef struct 
 {
@@ -115,19 +116,19 @@ uint32_t              TxMailbox;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_CAN_Init(void);
 static void MX_USART3_UART_Init(void);
-static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 void WriteCAN(uint16_t ID,uint8_t *data);
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan);
 void assignUint32_tChar8byte(uint32_t value, char* buffer);
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
 void clearBuffer (uint8_t *buff);
 void updateData (uint8_t checkType,uint8_t *data);
-void CharToNum (uint16_t *SaveNum, uint8_t *DataIn, uint8_t Index);
+
 
 /* USER CODE END PFP */
 
@@ -164,9 +165,9 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_CAN_Init();
   MX_USART3_UART_Init();
-  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
 	HAL_CAN_Start(&hcan);
@@ -181,10 +182,9 @@ int main(void)
 
 	
 	
-	HAL_TIM_Base_Start_IT(&htim3);
-	HAL_UART_Receive_IT(&huart3, &buffer, 1);
-	
 
+	HAL_UART_Receive_DMA(&huart3, &buffer, 1);
+	HAL_UART_Transmit_DMA(&huart3, (uint8_t*) DMAdataSend, sizeof(DMAdataSend));
 	
   /* USER CODE END 2 */
 
@@ -291,51 +291,6 @@ static void MX_CAN_Init(void)
 }
 
 /**
-  * @brief TIM3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM3_Init(void)
-{
-
-  /* USER CODE BEGIN TIM3_Init 0 */
-
-  /* USER CODE END TIM3_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM3_Init 1 */
-
-  /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 1079;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 9999;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM3_Init 2 */
-
-  /* USER CODE END TIM3_Init 2 */
-
-}
-
-/**
   * @brief USART3 Initialization Function
   * @param None
   * @retval None
@@ -365,6 +320,25 @@ static void MX_USART3_UART_Init(void)
   /* USER CODE BEGIN USART3_Init 2 */
 
   /* USER CODE END USART3_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
 
 }
 
@@ -477,56 +451,37 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	}
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-  if(htim -> Instance == TIM3){
-//		switch (countSend)
-//    {
-//    	case 0:
-//				sprintf(data_y,"\nY%.1f",dataCANyaw.value);
-//				HAL_UART_Transmit(&huart3,(uint8_t*)data_y,sizeof(data_y),HAL_MAX_DELAY);
-//    		break;
-//    	case 1:
-//				sprintf(data_d,"\nD%.1f",dataCANpos.value);
-//				HAL_UART_Transmit(&huart3,(uint8_t*)data_d,sizeof(data_d),HAL_MAX_DELAY);
-//    		break;
-//    	case 2:
-//				sprintf(data_v,"\nV%.1f",dataCANvel.value);
-//				HAL_UART_Transmit(&huart3,(uint8_t*)data_v,sizeof(data_v),HAL_MAX_DELAY);
-//    		break;
-//			case 3:
-//				sprintf(data_a,"\nA%.1f",dataCANangularVel.value);
-//				HAL_UART_Transmit(&huart3,(uint8_t*)data_a,sizeof(data_a),HAL_MAX_DELAY);
-//    		break;
-//			case 4:
-//				sprintf(data_us,"\nU%d,%d,%d,%d",ultraSonicLeft.outside,ultraSonicLeft.center,ultraSonicRight.center,ultraSonicRight.outside);
-//				HAL_UART_Transmit(&huart3,(uint8_t*)data_us,sizeof(data_us),HAL_MAX_DELAY);
-//    		break;
-//    }
-//		countSend++;
-//		if (countSend >4)countSend =0;
-		sprintf(data_y,"\nY%.1f",dataCANyaw.value);
-		HAL_UART_Transmit(&huart3,(uint8_t*)data_y,sizeof(data_y),HAL_MAX_DELAY);
-		
-		sprintf(data_d,"\nD%.1f",dataCANpos.value);
-		HAL_UART_Transmit(&huart3,(uint8_t*)data_d,sizeof(data_d),HAL_MAX_DELAY);
-		
-		sprintf(data_v,"\nV%.1f",dataCANvel.value);
-		HAL_UART_Transmit(&huart3,(uint8_t*)data_v,sizeof(data_v),HAL_MAX_DELAY);
-		
-		sprintf(data_a,"\nA%.1f",dataCANangularVel.value);
-		HAL_UART_Transmit(&huart3,(uint8_t*)data_a,sizeof(data_a),HAL_MAX_DELAY);
-		
-		sprintf(data_us,"\nU%d,%d,%d,%d",ultraSonicLeft.outside,ultraSonicLeft.center,ultraSonicRight.center,ultraSonicRight.outside);
-		HAL_UART_Transmit(&huart3,(uint8_t*)data_us,sizeof(data_us),HAL_MAX_DELAY);
-		
-	}
+		for(int i=0;i<21;i++)
+		{
+			DMAdataSend[i]= 0;
+		}
+		switch (countSend)
+    {
+    	case 0:
+				sprintf(DMAdataSend,"\nY%.1f",dataCANyaw.value);
+    		break;
+    	case 1:
+				sprintf(DMAdataSend,"\nD%.1f",dataCANpos.value);
+    		break;
+    	case 2:
+				sprintf(DMAdataSend,"\nV%.1f",dataCANvel.value);
+    		break;
+			case 3:
+				sprintf(DMAdataSend,"\nA%.1f",dataCANangularVel.value);
+    		break;
+			case 4:
+				sprintf(DMAdataSend,"\nU%d,%d,%d,%d",ultraSonicLeft.outside,ultraSonicLeft.center,ultraSonicRight.center,ultraSonicRight.outside);
+    		break;
+    }
+		countSend++;
+		if (countSend >4)countSend =0;
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-	
-
 	if(huart->Instance == USART3) 
 	{
 		if (buffer != 10)
@@ -539,8 +494,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			updateData (dataBuff[0], dataBuff);
 			clearBuffer(dataBuff);
 		}
-		HAL_UART_Receive_IT(&huart3, &buffer, 1);
-		
 	}
 }
 
