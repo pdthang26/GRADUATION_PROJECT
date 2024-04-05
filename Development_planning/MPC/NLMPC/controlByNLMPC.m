@@ -1,4 +1,4 @@
-function mv = controlByNLMPC(nlmpcObject,ekfObject,x,lastmv,unMeasValue,curvature,Ts,reference)
+function [mv,nlmpcObject,ekfObject] = controlByNLMPC(nlmpcObject,ekfObject,x,lastmv,unMeasValue,curvature,Ts,reference)
 % States x = [  lateral velocity (Vy)
 %               yaw rate (psi_dot)
 %               longitudinal velocity (Vx)
@@ -10,7 +10,7 @@ function mv = controlByNLMPC(nlmpcObject,ekfObject,x,lastmv,unMeasValue,curvatur
 
 % Outputs:
 %           y: Output vector - [Vx e1 e2+x_od]
-y = [x0(3);x0(5);x0(6)+x0(7)];
+y = [x(3);x(5);x(6)+x(7)];
 
 % Correct previous prediction
 xk = correct(ekfObject,y);
