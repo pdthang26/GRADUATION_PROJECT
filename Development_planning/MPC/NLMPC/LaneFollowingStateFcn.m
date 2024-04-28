@@ -22,8 +22,8 @@ function dxdt = LaneFollowingStateFcn(x,u)
 %#codegen
 
 %% Vehicle Parameters
-m = 1575;   % Mass of car
-Iz = 2875;  % Moment of inertia about Z axis
+m = 500;   % Mass of car
+Iz = 2875;  % Moment of inertia about Z axis 
 lf = 1.2;   % Distance between Center of Gravity and Front axle 
 lr = 1.6;   % Distance between Center of Gravity and Rear axle
 Cf = 19000; % Cornering stiffness of the front tires (N/rad)
