@@ -457,6 +457,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		}
 		else
 		MPU6050_Read_All(&hi2c1, &Data);
+		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+		yawValue = (float)Data.AngleZ;
+		convertFloatTo8Byte(yawValue, TxData, 4, 7);
+		TxData[3] = 'Y';
+		WriteCAN(MASTER_ID, TxData);
 	}
 }
 
@@ -483,18 +488,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-	if(htim ->Instance == TIM2)
-	{
-		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-		yawValue = (float)Data.AngleZ;
-		convertFloatTo8Byte(yawValue, TxData, 4, 7);
-		TxData[3] = 'Y';
-		WriteCAN(MASTER_ID, TxData);
-		
-	}
-}
+
 /* USER CODE END 4 */
 
 /**

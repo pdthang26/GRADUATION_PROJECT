@@ -18,9 +18,9 @@ import cv2
 from numba import jit
 import time
 
-# Khởi động matlab engine
-eng = matlab.engine.start_matlab()
-print('MALAB ENGINE FINISHED BEGINNING !!!')
+# # Khởi động matlab engine
+# eng = matlab.engine.start_matlab()
+# print('MALAB ENGINE FINISHED BEGINNING !!!')
 
 '''-----------------------------------------------------------------
 --------------------------------------------------------------------
@@ -248,7 +248,6 @@ def show_angular_vel():
         if angular_vel.startswith('A'):
             angular_vel_display['text'] = angular_vel[1:].replace('\x00','') 
             actual_angular_vel = float( angular_vel[1:].replace('\x00',''))  
-            
             break
 actual_angle = 0
 # hàm xử lý show angle
@@ -326,16 +325,34 @@ def show_gps():
 ultra_values = []
 new_values = []
 
-def show_ultrasonic():
-    global ultra_values,new_values
-    ultrasonic = ultra_uart.readline().decode().strip()
-    if ultrasonic.startswith('U'):
-        ultra_data = ultrasonic[1:].replace('\x00','').split(',')
-        if len(ultra_data) == 4:
-            new_values = [float(value) for value in ultra_data]
-            if new_values != ultra_values:
-                ultra_values = new_values
+# def show_ultrasonic():
+#     global ultra_values,new_values
+#     ultrasonic = ultra_uart.readline().decode().strip()
+#     if ultrasonic.startswith('U'):
+#         ultra_data = ultrasonic[1:].replace('\x00','').split(',')
+#         if len(ultra_data) == 4:
+#             new_values = [float(value) for value in ultra_data]
+#             if new_values != ultra_values:
+#                 ultra_values = new_values
+def append_sensor_value_to_csv(value, file_name='sensor_data.csv'):
+    # Tạo DataFrame từ giá trị
+    df = pd.DataFrame([value], columns=['Sensor Value'])
+    
+    # Kiểm tra file có tồn tại và có dữ liệu hay không để quyết định có cần viết header hay không
+    try:
+        df_header = pd.read_csv(file_name, nrows=0)
+        need_header = not df_header.columns.any()
+    except FileNotFoundError:
+        need_header = True
 
+    # Ghi DataFrame vào file CSV, chế độ append, không lưu chỉ mục
+    df.to_csv(file_name, mode='a', header=need_header, index=False)
+def save_data():
+    
+        append_sensor_value_to_csv(actual_angular_vel, "ang_vel_data.csv")
+        append_sensor_value_to_csv(actual_angle, "actual_angle_data.csv")
+        append_sensor_value_to_csv(actual_vel , "actual_vel_data.csv")
+        append_sensor_value_to_csv(actual_dis, "actual_dis_data.csv")
 # Hàm nhấn nút show value
 def show():
     while True:
@@ -343,12 +360,16 @@ def show():
         show_dis()
         show_vel()
         show_angular_vel()
-        show_ultrasonic()
+        save_data()
+        # show_ultrasonic()
+
+
 
 # phân luồng cho nút show 
 def show_click():
     threading.Thread(target = show).start()
-    threading.Thread(target = show_gps).start()
+    # threading.Thread(target= save_data).start()
+    # threading.Thread(target = show_gps).start()
 
 # Tạo nút Show value
 show_button = tk.Button(root,text = 'Show Value',state= 'disabled',bg='white',command=show_click)
@@ -1397,5 +1418,5 @@ objects_1.append(brake_slide)
 
 # Chạy vòng lặp giao diện
 root.mainloop()
-eng.quit()
-print("EXIT MATLAB ENGINE !!!")
+# eng.quit()
+# print("EXIT MATLAB ENGINE !!!")

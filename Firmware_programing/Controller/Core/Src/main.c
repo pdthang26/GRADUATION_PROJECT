@@ -86,10 +86,16 @@ typedef struct
 	float value;
 }dataCAN;
 
+typedef struct  
+{
+	char type;
+	uint32_t value;
+}dataCANfront;
+
 dataCAN dataCANvel = {.type = 'V'};
 dataCAN dataCANpos = {.type = 'P'};
 dataCAN dataCANyaw = {.type = 'Y'};
-dataCAN dataCANangularVel = {.type = 'A'};
+dataCANfront dataCANangularVel = {.type = 'A'};
 
 typedef struct  
 {
@@ -181,7 +187,7 @@ int main(void)
 
 
 	
-	
+
 
 	HAL_UART_Receive_DMA(&huart3, &buffer, 1);
 	HAL_UART_Transmit_DMA(&huart3, (uint8_t*) DMAdataSend, sizeof(DMAdataSend));
@@ -444,7 +450,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 			}
 			else if(RxData[3]== dataCANangularVel.type)
 			{
-				dataCANangularVel.value = convert8ByteToFloat(RxData,4,7);
+				dataCANangularVel.value = convert8byteToUint32_t(RxData,4,7);
 				HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_4);
 			}
 		}
@@ -463,21 +469,21 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     	case 0:
 				sprintf(DMAdataSend,"\nY%.1f",dataCANyaw.value);
     		break;
-    	case 1:
+    	case 2:
 				sprintf(DMAdataSend,"\nD%.1f",dataCANpos.value);
     		break;
-    	case 2:
+    	case 4:
 				sprintf(DMAdataSend,"\nV%.1f",dataCANvel.value);
     		break;
-			case 3:
-				sprintf(DMAdataSend,"\nA%.1f",dataCANangularVel.value);
+			case 6:
+				sprintf(DMAdataSend,"\nA%d",dataCANangularVel.value);
     		break;
-			case 4:
-				sprintf(DMAdataSend,"\nU%d,%d,%d,%d",ultraSonicLeft.outside,ultraSonicLeft.center,ultraSonicRight.center,ultraSonicRight.outside);
+			case 8:
+//				sprintf(DMAdataSend,"\nU%d,%d,%d,%d",ultraSonicLeft.outside,ultraSonicLeft.center,ultraSonicRight.center,ultraSonicRight.outside);
     		break;
     }
 		countSend++;
-		if (countSend >4)countSend =0;
+		if (countSend >10)countSend =0;
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)

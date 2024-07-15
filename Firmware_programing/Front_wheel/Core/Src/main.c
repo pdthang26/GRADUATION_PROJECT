@@ -221,7 +221,7 @@ int main(void)
 		switch (mode)
 		{
 			case OFFSET:
-				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 50000);
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 65535);
 //			
 				while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5)==1){}
 				count=-1;
@@ -726,7 +726,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			angular_vel = (encoderValue-last_encoderValue)*PI/8;
 			
 			TxData[3] = 'A';
-			convertFloatTo8Byte(angular_vel, TxData, 4, 7 );
+			convertUint32_tTo8byte(encoderValue, TxData, 4, 7 );
 			WriteCAN(MASTER_ID,TxData);
 			
 			last_encoderValue = encoderValue;
@@ -789,12 +789,12 @@ void dc_motor_control(float setpoint, float input)
 			// tính gia tri PWM tu gia tri dieu khien PID va xuat xung PWM tai chan PB6
 		if (output <0)
 		{
-			pwmValueCCW = (uint16_t)(-output *0.01* (vel*350));
+			pwmValueCCW = (uint16_t)(-output *0.01* (vel*400));
 			pwmValueCW = 0;
 		}
 		else if (output>0)
 		{
-			pwmValueCW = (uint16_t)(output *0.01* (vel*350));
+			pwmValueCW = (uint16_t)(output *0.01* (vel*400));
 			pwmValueCCW = 0;
 		}
 		else
